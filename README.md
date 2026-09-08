@@ -64,3 +64,7 @@ unix socket：`~/Library/Application Support/iterm-focus-hud/control.sock`，新
 
 - Zellij WASM 插件主路径；往终端 buffer 画假遮罩
 - 本功能塞进 agent-board / overview / agent-resume
+
+## License
+
+GNU Affero General Public License v3.0 (AGPL-3.0) — 见 [LICENSE](LICENSE)。
