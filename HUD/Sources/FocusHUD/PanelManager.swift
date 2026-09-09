@@ -50,9 +50,82 @@ final class HUDContentView: NSView {
 final class PanelManager {
     var onCardClick: (() -> Void)?
     private var panels: [NSPanel] = []
+    private var active = false
+    private var suspended = false
+    private var resumeTimer: Timer?
 
     func show(frames: [[Double]]) {
-        hide()
+        active = true
+        // 显示桌面时 iTerm 失焦的 show 会晚到：若此刻前台是 Finder（显示桌面中），先挂起不显示
+        if NSWorkspace.shared.frontmostApplication?.bundleIdentifier == "com.apple.finder" {
+            enterSuspend()
+        } else {
+            leaveSuspend()
+            display(frames)
+        }
+    }
+
+    func hide() {
+        active = false
+        leaveSuspend()
+        destroyPanels()
+    }
+
+    /// 显示桌面 / 前台变为 Finder 时：隐藏遮罩，等 iTerm 窗口回到屏上再自动恢复。
+    func suspendForDesktop() {
+        guard active else { return }
+        enterSuspend()
+    }
+
+    /// 回到其它 App：用当前在屏的 iTerm 窗口恢复遮罩。
+    func resumeFromDesktop() {
+        guard active, suspended else { return }
+        leaveSuspend()
+        displayCurrentITermWindows()
+    }
+
+    private func enterSuspend() {
+        guard !suspended else { return }
+        suspended = true
+        destroyPanels()
+        startResumeTimer()
+    }
+
+    private func leaveSuspend() {
+        stopResumeTimer()
+        suspended = false
+    }
+
+    /// 挂起期间每秒检查：iTerm 窗口回到屏上（显示桌面已恢复）→ 自动恢复遮罩。
+    private func checkResume() {
+        guard active, suspended else { return }
+        let iterms = itermWindowNumbers()
+        guard !iterms.isEmpty else { return }
+        leaveSuspend()
+        displayCurrentITermWindows()
+    }
+
+    private func startResumeTimer() {
+        stopResumeTimer()
+        let t = Timer(timeInterval: 1.0, repeats: true) { [weak self] _ in
+            self?.checkResume()
+        }
+        RunLoop.main.add(t, forMode: .common)
+        resumeTimer = t
+    }
+
+    private func stopResumeTimer() {
+        resumeTimer?.invalidate()
+        resumeTimer = nil
+    }
+
+    private func displayCurrentITermWindows() {
+        let iterms = itermWindowNumbers()
+        display(iterms.map { [$0.rect.minX, $0.rect.minY, $0.rect.width, $0.rect.height] })
+    }
+
+    private func display(_ frames: [[Double]]) {
+        destroyPanels()
         let itermWindows = itermWindowNumbers()
         for f in frames where f.count >= 4 {
             let rect = NSRect(x: f[0], y: f[1], width: f[2], height: f[3])
@@ -64,7 +137,7 @@ final class PanelManager {
         }
     }
 
-    func hide() {
+    private func destroyPanels() {
         for p in panels {
             p.orderOut(nil)
             p.close()
@@ -99,7 +172,7 @@ final class PanelManager {
         )
         panel.isFloatingPanel = false
         panel.level = .normal
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.isOpaque = false
         panel.backgroundColor = .clear
         panel.hasShadow = false

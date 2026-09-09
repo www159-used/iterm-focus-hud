@@ -22,10 +22,13 @@ if [[ -z "$PY" ]]; then
     exit 1
 fi
 
+MONITOR_MAX_LIFETIME=${MONITOR_MAX_LIFETIME:-1800}  # 30 分钟，防止 monitor 的 iTerm 连接变旧失效
+
 "$HUD" &
 HUD_PID=$!
 "$PY" "$SCRIPT" &
 MON_PID=$!
+MON_STARTED=$(date +%s)
 
 cleanup() {
     kill "$HUD_PID" "$MON_PID" 2>/dev/null || true
@@ -40,6 +43,12 @@ while true; do
     if ! kill -0 "$MON_PID" 2>/dev/null; then
         "$PY" "$SCRIPT" &
         MON_PID=$!
+        MON_STARTED=$(date +%s)
+    elif (( $(date +%s) - MON_STARTED > MONITOR_MAX_LIFETIME )); then
+        kill "$MON_PID" 2>/dev/null || true
+        "$PY" "$SCRIPT" &
+        MON_PID=$!
+        MON_STARTED=$(date +%s)
     fi
     sleep 5
 done

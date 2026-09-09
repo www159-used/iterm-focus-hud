@@ -25,6 +25,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSLog("focus-hud: failed to start socket server: %@", "\(error)")
         }
         self.server = server
+
+        observeFrontmostApp()
+    }
+
+    /// 事件驱动：前台 App 变为 Finder（含「显示桌面」）→ 隐藏遮罩；回到其它 App → 恢复（iTerm 仍失焦时）。
+    private func observeFrontmostApp() {
+        let center = NSWorkspace.shared.notificationCenter
+        center.addObserver(forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) { [weak self] note in
+            guard let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
+                  let bundleID = app.bundleIdentifier else { return }
+            switch bundleID {
+            case "com.apple.finder":
+                self?.panels.suspendForDesktop()
+            case "com.googlecode.iterm2":
+                break
+            default:
+                self?.panels.resumeFromDesktop()
+            }
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
