@@ -17,4 +17,11 @@ struct ControlMessage: Decodable {
     let cmd: String
     /// show 时的窗口 frame 列表，每项为 [x, y, width, height]（AppKit 屏幕坐标，左下原点）。
     let frames: [[Double]]?
+    let windows: [WindowOverlay]?
+    let subtle: Bool?
+}
+
+struct WindowOverlay: Decodable, Equatable {
+    let windowID: String?
+    let frame: [Double]
 }

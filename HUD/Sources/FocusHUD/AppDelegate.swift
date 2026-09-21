@@ -9,8 +9,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.accessory)
         Paths.ensureSupportDir()
 
-        panels.onCardClick = { [weak self] in
-            self?.clickCard()
+        panels.onCardClick = { [weak self] windowID in
+            self?.clickCard(windowID: windowID)
         }
 
         let server = SocketServer(path: Paths.socketPath)
@@ -55,7 +55,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
               let msg = try? JSONDecoder().decode(ControlMessage.self, from: data) else { return }
         switch msg.cmd {
         case "show":
-            panels.show(frames: msg.frames ?? [])
+            panels.show(windows: msg.windows ?? (msg.frames ?? []).map { WindowOverlay(windowID: nil, frame: $0) },
+                        subtle: msg.subtle ?? false)
         case "hide":
             panels.hide()
         default:
@@ -63,7 +64,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func clickCard() {
+    private func clickCard(windowID: String?) {
+        if let windowID = windowID {
+            let path = Paths.supportDir.appendingPathComponent("activate.sock").path
+            guard let data = try? JSONEncoder().encode(["windowID": windowID]),
+                  let payload = String(data: data, encoding: .utf8) else { return }
+            DispatchQueue.global().async {
+                if sendOnce(payload: payload, to: path) != 0 {
+                    NSLog("focus-hud: failed to request window activation")
+                }
+            }
+            return
+        }
         panels.hide()
         if let iterm = NSRunningApplication.runningApplications(withBundleIdentifier: "com.googlecode.iterm2").first {
             iterm.activate(options: [.activateAllWindows])

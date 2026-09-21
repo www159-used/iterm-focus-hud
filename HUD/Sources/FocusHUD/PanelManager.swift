@@ -1,14 +1,16 @@
 import AppKit
 import CoreGraphics
 
-/// 半透明遮罩：整窗深色压暗，正中一张卡片，卡片可点击回焦，遮罩区域点击穿透。
+/// 独立窗口遮罩：应用内切换时浅色压暗，所有失焦窗口显示统一提示卡。
 final class HUDContentView: NSView {
     var onCardClick: (() -> Void)?
+
+    var subtle = false
 
     override var isOpaque: Bool { false }
 
     override func draw(_ dirtyRect: NSRect) {
-        NSColor.black.withAlphaComponent(0.35).setFill()
+        NSColor.black.withAlphaComponent(subtle ? 0.18 : 0.35).setFill()
         bounds.fill()
 
         let card = cardFrame()
@@ -48,20 +50,27 @@ final class HUDContentView: NSView {
 
 /// 管理当前显示的一组遮罩 panel。
 final class PanelManager {
-    var onCardClick: (() -> Void)?
+    var onCardClick: ((String?) -> Void)?
+    private var windows: [WindowOverlay] = []
+    private var subtle = false
+    private var renderedWindows: [WindowOverlay] = []
+    private var renderedNumbers: [Int] = []
+    private var renderedSubtle = false
     private var panels: [NSPanel] = []
     private var active = false
     private var suspended = false
     private var resumeTimer: Timer?
 
-    func show(frames: [[Double]]) {
+    func show(windows: [WindowOverlay], subtle: Bool) {
+        self.windows = windows
+        self.subtle = subtle
         active = true
         // 显示桌面时 iTerm 失焦的 show 会晚到：若此刻前台是 Finder（显示桌面中），先挂起不显示
         if NSWorkspace.shared.frontmostApplication?.bundleIdentifier == "com.apple.finder" {
             enterSuspend()
         } else {
             leaveSuspend()
-            display(frames)
+            displayCurrentITermWindows()
         }
     }
 
@@ -120,20 +129,30 @@ final class PanelManager {
     }
 
     private func displayCurrentITermWindows() {
-        let iterms = itermWindowNumbers()
-        display(iterms.map { [$0.rect.minX, $0.rect.minY, $0.rect.width, $0.rect.height] })
+        display(windows)
     }
 
-    private func display(_ frames: [[Double]]) {
-        destroyPanels()
-        let itermWindows = itermWindowNumbers()
-        for f in frames where f.count >= 4 {
+    private func display(_ windows: [WindowOverlay]) {
+        let visible = itermWindowNumbers()
+        let matches: [(WindowOverlay, NSRect, Int)] = windows.compactMap { window in
+            let f = window.frame
+            guard f.count == 4 else { return nil }
             let rect = NSRect(x: f[0], y: f[1], width: f[2], height: f[3])
-            guard rect.width > 0, rect.height > 0 else { continue }
-            // 遮罩排在对应 iTerm 窗口正上方（普通层级）：
-            // 盖住 iTerm 本身；叠在其上的其它窗口仍在更高 z-order，永不被挡，也无需实时更新。
-            let above = itermWindows.first { $0.rect.equalTo(rect) }?.number
-            panels.append(makePanel(rect: rect, aboveWindow: above))
+            // Geometry alone cannot distinguish perfectly overlapping windows.
+            // Skip ambiguous matches instead of shading/activating the wrong one.
+            let candidates = visible.filter { $0.rect.equalTo(rect) }
+            guard candidates.count == 1, let target = candidates.first else { return nil }
+            return (window, rect, target.number)
+        }
+        let nextWindows = matches.map { $0.0 }
+        let nextNumbers = matches.map { $0.2 }
+        guard nextWindows != renderedWindows || nextNumbers != renderedNumbers || subtle != renderedSubtle else { return }
+        destroyPanels()
+        renderedWindows = nextWindows
+        renderedNumbers = nextNumbers
+        renderedSubtle = subtle
+        for (window, rect, number) in matches {
+            panels.append(makePanel(rect: rect, aboveWindow: number, windowID: window.windowID))
         }
     }
 
@@ -143,6 +162,8 @@ final class PanelManager {
             p.close()
         }
         panels.removeAll()
+        renderedWindows = []
+        renderedNumbers = []
     }
 
     /// 当前在屏上的 iTerm 窗口（层 0）的 AppKit 矩形 + 全局窗口号。
@@ -163,7 +184,7 @@ final class PanelManager {
         }
     }
 
-    private func makePanel(rect: NSRect, aboveWindow: Int?) -> NSPanel {
+    private func makePanel(rect: NSRect, aboveWindow: Int?, windowID: String?) -> NSPanel {
         let panel = NSPanel(
             contentRect: rect,
             styleMask: [.borderless, .nonactivatingPanel],
@@ -182,7 +203,8 @@ final class PanelManager {
         panel.isReleasedWhenClosed = false
 
         let content = HUDContentView(frame: rect.offsetBy(dx: -rect.minX, dy: -rect.minY))
-        content.onCardClick = onCardClick
+        content.subtle = subtle
+        content.onCardClick = { [weak self] in self?.onCardClick?(windowID) }
         panel.contentView = content
         if let num = aboveWindow {
             panel.order(.above, relativeTo: num)

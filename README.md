@@ -1,6 +1,6 @@
 # iterm-focus-hud
 
-iTerm2 失焦时：每个可见 iTerm 窗口上盖半透明遮罩 + 居中 dialog 提示；回焦立即消失；点击 iTerm 窗口任意位置回焦并关闭 HUD。
+按独立窗口显示焦点：当前聚焦窗口无遮罩，其他可见 iTerm2 窗口显示浅遮罩和居中提示；切到其他应用后，所有可见窗口显示深色遮罩和相同的居中提示。点击遮罩可激活对应窗口。
 
 检测用 iTerm2 官方 Focus API；展示用原生 macOS HUD（borderless `NSPanel`，整块遮罩可点击）。不是 Zellij 插件，不污染终端 buffer。
 
@@ -10,9 +10,9 @@ iTerm2 失焦时：每个可见 iTerm 窗口上盖半透明遮罩 + 居中 dialo
 LaunchAgent com.ww.focus-hud
   └─ start-all.sh（supervisor，任一挂掉自动重启）
        ├─ focus-hud（原生 HUD daemon）
-       └─ python focus_monitor.py（iTerm2 FocusMonitor）
+       └─ python focus_monitor.py（iTerm2 窗口焦点同步）
               │
-   application_active=false/true │  unix socket JSON
+   窗口焦点与几何状态           │  unix socket JSON
               ▼                  ▼
         原生 HUD：半透明遮罩 + 居中卡片
 ```
@@ -38,10 +38,14 @@ make uninstall    # 卸载
 
 ## 行为细节
 
-- 失焦：给每个 iTerm 窗口盖遮罩（居中卡片仅作视觉提示）。
+- iTerm2 内切换独立窗口：当前窗口无遮罩，其余窗口显示 18% 黑色浅遮罩和居中提示卡。
+- 切到其他应用：可见 iTerm2 窗口显示 35% 黑色遮罩和居中提示卡。
+- 两种遮罩统一显示「iTerm 已失焦」和「点击任意处返回」。
+- 约每 200ms 同步焦点和窗口位置；启动或 HUD 重启后自动同步，无需先切换焦点。
 - **遮罩层级 = 普通，直接排在对应 iTerm 窗口正上方**（`order(.above, relativeTo:)`）：盖住 iTerm 本身，但叠在其上的其它窗口（拖拽、全屏 App）仍在更高 z-order、永不被挡；由窗口服务器自动处理，**无需实时计算**。
-- **点击 iTerm 窗口任意位置（遮罩上）→ 激活 iTerm + 关闭 HUD**。
-- 回焦：`application_active=true` → 立即 hide。
+- **点击遮罩 → 通过 iTerm2 API 激活对应独立窗口**；其余窗口继续显示浅遮罩。
+- 仅为当前在屏且能匹配的窗口创建遮罩，最小化或其他桌面的窗口不创建悬空遮罩。窗口矩形完全重合、无法唯一匹配时暂不显示遮罩，避免遮住或激活错误窗口。
+- Tab 和分屏 pane 不分别加遮罩。
 
 ## 手动调试
 
@@ -54,8 +58,10 @@ focus-hud send '{"cmd":"hide"}'    # 隐藏全部
 ## 协议
 
 unix socket：`~/Library/Application Support/iterm-focus-hud/control.sock`，新行分隔 JSON。
+点击请求通过同目录的 `activate.sock` 发送 `{"windowID":"..."}` 给 Python monitor，再调用窗口与应用的激活 API。参见 [iTerm2 Window API](https://iterm2.com/python-api/window.html)。
 
 ```jsonc
+{"cmd":"show","windows":[{"windowID":"pty-...","frame":[x,y,w,h]}],"subtle":true}
 {"cmd":"show","frames":[[x,y,w,h], ...]}   // AppKit 全局屏幕坐标（左下原点，points，直接取 async_get_frame）
 {"cmd":"hide"}
 ```
@@ -68,3 +74,10 @@ unix socket：`~/Library/Application Support/iterm-focus-hud/control.sock`，新
 ## License
 
 GNU Affero General Public License v3.0 (AGPL-3.0) — 见 [LICENSE](LICENSE)。
+
+## 验证
+
+```bash
+python3 -m unittest discover -s tests -v
+make build
+```
