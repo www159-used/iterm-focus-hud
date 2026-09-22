@@ -79,5 +79,6 @@ GNU Affero General Public License v3.0 (AGPL-3.0) — 见 [LICENSE](LICENSE)。
 
 ```bash
 python3 -m unittest discover -s tests -v
+bash tests/test_hud_click.sh
 make build
 ```

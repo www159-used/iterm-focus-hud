@@ -9,6 +9,9 @@ final class HUDContentView: NSView {
 
     override var isOpaque: Bool { false }
 
+    // HUD 是非激活 panel；首次点击也必须送到 mouseDown 才能触发回焦。
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
     override func draw(_ dirtyRect: NSRect) {
         NSColor.black.withAlphaComponent(subtle ? 0.18 : 0.35).setFill()
         bounds.fill()
